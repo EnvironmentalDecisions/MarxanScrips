@@ -11,8 +11,8 @@ Create_longitudinal_distances<-function(file, limit_dist = .Machine$integer.max,
     
     #checking if the variables exists
     var = c("GridID","HydroID","NextDownID","Length")
-    if(!all(c(var[1],var[2],var[3],grep("Length", names(df), value=TRUE)) %in% colnames(df))){
-      var_needed <- which(!c(var[1],var[2],var[3],grep("Length", names(df), value=TRUE)) %in% colnames(df))
+    if(!all(var %in% colnames(df))){
+      var_needed <- which(!var %in% colnames(df))
       stop(paste("The following variables are needed: ", var[var_needed]),call. = FALSE)
     }
     
@@ -22,7 +22,7 @@ Create_longitudinal_distances<-function(file, limit_dist = .Machine$integer.max,
       df<-df[order(df$GridID),]
       df$NextDownID<-match(df$NextDownID,df$HydroID)
       df$NextDownID[is.na(df$NextDownID)] <- -1 
-      df<-df[c(var[1],var[3],grep("Length", names(df), value=TRUE))]
+      df<-df[,var]
     }
   }
   else if(is.data.frame(file)){
@@ -77,10 +77,9 @@ Create_longitudinal_distances<-function(file, limit_dist = .Machine$integer.max,
     return(data_distances)
   }
   else{
-    write.csv(data_distances, file="Longitudinal_distance.csv")
+    write.csv(data_distances, file="Longitudinal_distance.csv", row.names = FALSE)
   }
 }
-
 
 #How to use---------------------------------------------------------
 #From .csv
@@ -97,4 +96,7 @@ Create_longitudinal_distances<-function(file, limit_dist = .Machine$integer.max,
 #Function
 #limit_dist = maximum distance allowed between units
 #limit_connect = maximum connections allowed between units
-##Create_longitudinal_distances(file, limit_connect = 2)
+##Create_longitudinal_distances(file)
+
+
+
