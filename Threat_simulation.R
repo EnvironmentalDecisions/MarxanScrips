@@ -1,29 +1,71 @@
-library(rgeos) #to use the gCentroid and gTouches functions
-library(devtools) #to use the source_url function
-library(reshape2) #to use melt function
-library(sp) #to use spDists function
-library(dplyr) #to use left_join function
-library(ggplot2) #To use the fortify function
-library(rgdal) #To use the readOGR function
-source_url("https://raw.githubusercontent.com/EnvironmentalDecisions/MarxanScrips/main/Downstream_Distances.R")
+#' @include internal.R
+NULL
 
-#Function to simulate distribution of threats--------------------------------------
-Create_threat_distribution <- function(file, csv_longitudinal_distance,
-                                       initial_units,
-                                       type_of_prop = 1,
-                                       expansion_speed = 0,
-                                       periods = 10,
-                                       time_step = 1,
-                                       adjacency = TRUE){
+#' Simulate invasive species
+#'
+#' Simulate the expansion of a threat from differents initial points and propagations. By default,
+#' the output will contain values between zero and one.
+#'
+#' @param x [`SpatialPolygonsDataFrame-class`] object to use as
+#'    a template.
+#'
+#' @param csv_longitudinal_distance `data.frame-class` data frame object (optional) that contain information of
+#'    longitudinal distances between sites (for example inside the river).
+#'
+#' @param initial_units `list` list of sites where the threat appear.
+#'
+#' @param type_of_prop `integer` type of propagation. This is represent for a radial propagation (1),
+#'  downstream propagation (2), upstream propagation (3) or downstream and upstream propagation (4). The
+#'  id's of planning units of \code{\link{csv_longitudinal_distance}} must be the same than the pu's from
+#'  x object.
+#'
+#' @param expansion_speed `numeric` velocity of the propagation the threat.
+#'
+#' @param periods `integer` number of periods of simulation
+#'
+#' @param time_step `integer` number of periods needs to increase one level of the threat
+#'
+#' @param adjacency `logical` TRUE indicates that the propagation is at least to adjacent units
+#'
+#' @name simulate_invasive_specie
+#'
+#' @return [`data.frame-class`] object.
+#'
+#' @examples
+#' \dontrun{
+#' # simulate threat
+#' path <- system.file("extdata/input_big/", package = "prioriactions")
+#' x = raster::shapefile(paste0(path,"Fish_Mitchell.shp"))
+#'
+#' st <- simulate_invasive_specie(x, initial_units = c(150))
+#'
+#' }
+#'
+#' @export
+simulate_invasive_specie <- function(x, csv_longitudinal_distance = NULL,
+                                     initial_units = c(1),
+                                     type_of_prop = 1,
+                                     expansion_speed = 0,
+                                     periods = 10,
+                                     time_step = 1,
+                                     adjacency = TRUE){
+  
   
   #Checking inputs
-  if(is(file, "SpatialPolygonsDataFrame")){}
-  else{
-    stop("Incompatible file (SpatialPolygonsDataFrame required)", call. = FALSE)
-  }
-  if(is.data.frame(csv_longitudinal_distance)){}
-  else{
-    stop("Incompatible longitudinal distance file (DataFrame required)", call. = FALSE)
+  if(type_of_prop != 1){
+    if(is.data.frame(csv_longitudinal_distance)){
+      #Reading source function of longitudinal distances from github
+      longitudinal_distance <- csv_longitudinal_distance
+      colnames(longitudinal_distance) <- c("Var1", "Var2", "value")
+      uniques_pu <- unique(longitudinal_distance$Var1)
+      itself_distances <- data.frame(Var1 = uniques_pu,
+                                     Var2 = uniques_pu,
+                                     value = 0)
+      longitudinal_distance <- rbind(longitudinal_distance, itself_distances)
+    }
+    else{
+      stop("Incompatible longitudinal distance file (DataFrame required)", call. = FALSE)
+    }
   }
   
   assertthat::assert_that(
@@ -32,26 +74,18 @@ Create_threat_distribution <- function(file, csv_longitudinal_distance,
     is.numeric(expansion_speed),
     is.numeric(periods),
     is.numeric(time_step),
-    is.logical(adjacency)
+    is.logical(adjacency),
+    inherits(x, "SpatialPolygonsDataFrame")
   )
-  pus <- length(file$GridID)
-  
-  #Reading source function of longitudinal distances from github
-  longitudinal_distance <- csv_longitudinal_distance
-  colnames(longitudinal_distance) <- c("Var1", "Var2", "value")
-  uniques_pu <- unique(longitudinal_distance$Var1)
-  itself_distances <- data.frame(Var1 = uniques_pu,
-                                 Var2 = uniques_pu,
-                                 value = 0)
-  longitudinal_distance <- rbind(longitudinal_distance, itself_distances)
+  pus <- length(x$GridID)
   
   #Calculating radial distances
-  centroids <- rgeos::gCentroid(shp_mitchell, byid = TRUE)
+  centroids <- rgeos::gCentroid(x, byid = TRUE)
   radial_distance <- sp::spDists(centroids,longlat = FALSE)
   radial_distance <- reshape2::melt(radial_distance)
   
   #Calculating adjacency data
-  adjacency_data <- rgeos::gTouches(shp_mitchell, byid = TRUE)
+  adjacency_data <- rgeos::gTouches(x, byid = TRUE)
   rownames(adjacency_data) <- seq(1:pus)
   colnames(adjacency_data) <- seq(1:pus)
   adjacency_data <- reshape2::melt(adjacency_data)
@@ -70,8 +104,8 @@ Create_threat_distribution <- function(file, csv_longitudinal_distance,
   for(pu in initial_units){
     threat_status$state[pu] <- 1
     threat_status$level[pu] <- 1
-    threat_status$distance_to_focus <- 0
-    threat_status$last_change <- 1
+    threat_status$distance_to_focus[pu] <- 0.0
+    threat_status$last_change[pu] <- 1
   }
   
   #Setting data frame of connections depending of type of propagation
@@ -104,7 +138,9 @@ Create_threat_distribution <- function(file, csv_longitudinal_distance,
       while(connections_pu$value[i] <= expansion_speed || (isTRUE(connections_pu$adj[i] && adjacency == TRUE)))
       {
         id2 <- connections_pu$Var2[i]
-        
+        if(id2 == -1){
+          break
+        }
         #The unit is only evaluated if it didn't change its level this period
         if(threat_status$last_change[id2] != period){
           if(threat_status$level[id2] != 0){
@@ -136,50 +172,3 @@ Create_threat_distribution <- function(file, csv_longitudinal_distance,
   
   return(threat_status)
 }
-
-#Parameters---------------------------------------------------------------------
-
-#type_of_prop:
-# type of propagation (1,2,3, and 4) described below
-# 1 = radial
-# 2 = downstream
-# 3 = upstream
-# 4 = both
-
-#expansion_speed:
-# numeric parameter that indicates the velocity of propagation of the threat in a period 
-# (mts/period)
-
-#initial_units:
-# list parameter of units where the threat appear
-
-#time_step:
-# Number of periods that the threat needs to increase its level by 1 on an unit 
-
-#adjacency: 
-# Boolean parameter (TRUE/FALSE) that indicates if the propagation is do it between 
-# adjacent units. This could be use with complement the expansion_speed parameter
-
-#How to use--------------------------------------------------------------------
-
-path <- system.file("extdata/input_big/", package = "prioriactions")
-shp_mitchell = raster::shapefile(paste0(path,"Fish_Mitchell.shp"))
-
-file = read.csv("Longitudinal_distance.csv",)
-
-threat1 <- Create_threat_distribution(shp_mitchell, csv_longitudinal_distance = file, initial_units = c(200))
-
-
-threat1$distance_to_focus <- threat1$distance_to_focus/1000
-
-threat1$distance_to_focus[1] <- NA
-threat1$d <- 1/threat1$distance_to_focus
-
-
-shp_mitchell$t1 <- threat1$d
-
-tmap::tm_shape(shp_mitchell) +
-  tmap::tm_fill("t1", pal = c("white", "dodgerblue4")) +
-  tmap::tm_borders(col="black", lwd = 0.5)
-
-
